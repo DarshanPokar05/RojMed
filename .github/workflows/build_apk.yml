@@ -1,0 +1,78 @@
+# .github/workflows/build_apk.yml
+# ─────────────────────────────────────────────────────────────────
+# HOW TO USE:
+#   1. Push your roj_med/ source code to GitHub
+#   2. Add secrets: SUPABASE_URL and SUPABASE_ANON_KEY
+#      → GitHub repo → Settings → Secrets and variables → Actions → New secret
+#   3. Push any commit to main → this runs automatically
+#   4. Download APK: Actions tab → latest run → Artifacts → roj-med-release
+# ─────────────────────────────────────────────────────────────────
+
+name: Build Roj Med APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter 3.22.0
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.22.0"
+          channel: stable
+          cache: true
+
+      - name: Flutter version check
+        run: flutter --version
+
+      - name: Inject Supabase credentials
+        run: |
+          sed -i "s|YOUR_SUPABASE_URL|${{ secrets.SUPABASE_URL }}|g" lib/core/constants.dart
+          sed -i "s|YOUR_SUPABASE_ANON_KEY|${{ secrets.SUPABASE_ANON_KEY }}|g" lib/core/constants.dart
+          echo "Credentials injected"
+
+      - name: Create android/ scaffold (required for APK build)
+        run: |
+          flutter create --org com.rojmed --project-name roj_med temp_scaffold
+          if [ ! -d "android" ]; then
+            cp -r temp_scaffold/android ./android
+            echo "android/ folder created from scaffold"
+          else
+            echo "android/ folder already exists"
+          fi
+          rm -rf temp_scaffold
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate drift .g.dart files
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyse (non-blocking)
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: true
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: roj-med-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
